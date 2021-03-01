@@ -36,7 +36,6 @@ class lidar_simulator:
                               sin(z) * cos(a),
                               sin(z) * sin(a)])
         loc = los * d
-        loc[2] += lidar_hgt
 
         # Sanity check
         assert loc[2] == approx(sample_hgt(lidar_hgt, distance, p, r, a, z))
