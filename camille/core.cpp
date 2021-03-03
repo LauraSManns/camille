@@ -58,10 +58,10 @@ struct windfield_desc {
 static const auto sample_hgt_docstring = R"(
 Parameters
 ----------
-hub_hgt : float
-    Nacelle hub height
 lidar_hgt : float
     Height of the LiDAR
+heave : float
+    Vertical offset due to structure motion
 dist : float
     Measurement distance
 pitch : float
@@ -78,6 +78,7 @@ float
 )";
 
 double sample_hgt(double lidar_hgt,
+                  double heave,
                   double dist,
                   double pitch,
                   double roll,
@@ -92,7 +93,9 @@ double sample_hgt(double lidar_hgt,
     // The above collapsed to this:
     double magic = azm - roll;
     double scale = sin(zn) * cos(pitch) * sin(magic) + cos(zn) * sin(pitch);
-    return lidar_hgt + (dist / cos(zn)) * scale;
+
+    double elevation = heave + cos(pitch) * cos(roll) * lidar_hgt;
+    return elevation + (dist / cos(zn)) * scale;
 }
 
 static const auto shear_docstring = R"(
@@ -278,8 +281,8 @@ planar_desc calc_plane_desc(const sample& beam_a,
     double pitch = (beam_a.pitch + beam_b.pitch) / 2.0;
     double roll = (beam_a.roll + beam_b.roll) / 2.0;
 
-    double hgt_a = sample_hgt(lidar_hgt, dist, pitch, roll, azm_a, zn_a);
-    double hgt_b = sample_hgt(lidar_hgt, dist, pitch, roll, azm_b, zn_b);
+    double hgt_a = sample_hgt(lidar_hgt, 0, dist, pitch, roll, azm_a, zn_a);
+    double hgt_b = sample_hgt(lidar_hgt, 0, dist, pitch, roll, azm_b, zn_b);
     double hgt = (hgt_a + hgt_b) / 2.0;
 
     auto vec = planar_windspeed(

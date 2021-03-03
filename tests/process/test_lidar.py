@@ -26,45 +26,48 @@ class lidar_simulator:
         self.heave = heave
 
     def __call__(self, windfield, timestamp, distance, beam):
-        l = lidar_hgt
         d = distance / cos(zenith[beam])
         zn = zenith[beam]
         az = azimuth[beam]
         p = self.pitch
         r = self.roll
-        x = self.surge
-        z = self.heave
+        surge = self.surge
+        heave = self.heave
 
-        M = np.array([[1, 0, 0, 0],
-                      [0, 1, 0, 0],
-                      [0, 0, 1, l],
-                      [0, 0, 0, 1]])
-        R = np.array([[cos(p),  sin(p) * sin(r), -sin(p) * cos(r), 0],
-                      [     0,           cos(r),           sin(r), 0],
-                      [sin(p), -cos(p) * sin(r),  cos(p) * cos(r), 0],
-                      [     0,                0,                0, 1]])
-        T = np.array([[1, 0, 0, x],
-                      [0, 1, 0, 0],
-                      [0, 0, 1, z],
-                      [0, 0, 0, 1]])
-            # T R M d L
+        T_local = np.array([[1, 0, 0,         0],
+                            [0, 1, 0,         0],
+                            [0, 0, 1, lidar_hgt],
+                            [0, 0, 0,         1]])
+        R_world = np.array([[cos(p),  sin(p) * sin(r), -sin(p) * cos(r), 0],
+                            [     0,           cos(r),           sin(r), 0],
+                            [sin(p), -cos(p) * sin(r),  cos(p) * cos(r), 0],
+                            [     0,                0,                0, 1]])
+        T_world = np.array([[1, 0, 0, surge],
+                            [0, 1, 0,     0],
+                            [0, 0, 1, heave],
+                            [0, 0, 0,     1]])
+
         L = np.array([cos(zn),
                       sin(zn) * cos(az),
                       sin(zn) * sin(az),
-                      1])
+                      0])
+        P = d * L + np.array([0, 0, 0, 1])
 
-        measurement_position = T @ R @ M @ (d * L)
+        line_of_sight_direction = R_world @ L
+        measurement_position = T_world @ R_world @ T_local @ P
 
         # Sanity check
-        assert measurement_position[2] == approx(sample_hgt(lidar_hgt, distance, p, r, az, zn))
+        assert measurement_position[2] == approx(
+            sample_hgt(lidar_hgt, heave, distance, p, r, az, zn))
 
-        _, wnd = windfield(location)
-        rws = np.dot(-wnd, RL)
+        _, wnd = windfield(measurement_position)
+        rws = np.dot(-wnd, line_of_sight_direction[:3])
 
         return timestamp, beam, rws, 1, self.pitch, self.roll
 
     def __repr__(self):
-        return 'lidar_simulator({}, {})'.format(self.pitch, self.roll)
+        return 'lidar_simulator({}, {}, {}, {})'.format(self.pitch, self.roll,
+                                                        self.surge, self.heave)
 
 
 class windfield_function:
@@ -128,12 +131,12 @@ windspeeds = floats(min_value=0.5, max_value=18.0)                              
 shears = floats(min_value=0.143 / 2, max_value=0.143 * 2)
 veers = floats(min_value=-0.0314159, max_value=0.0314159) # +- 1.8 deg / m
 heaves = floats(min_value=-1000.0, max_value=1000.0)
-surges = float(min_value=-1000.0, max_value=1000.0)                             # ridiculous numbers
+surges = floats(min_value=-1000.0, max_value=1000.0)                             # ridiculous numbers
 
 windfields = builds(windfield_function, directions, windspeeds)
 lidars = builds(lidar_simulator, pitch=angles, roll=angles, surge=surges, heave=heaves)  # lidars will be examples of lidar simulators with given specifications
 # shear is inaccurate with roll, could be addressed
-flat_lidars = builds(lidar_simulator, pitch=angles, roll=0, surge=surges, heave=heaves)
+flat_lidars = builds(lidar_simulator, pitch=angles, surge=surges, heave=heaves)
 
 #surge_velocities = floats(min_value=-25.0, max_value=25.0)                      # horizontal windspeed irrelevant
 sheared_veering_windfields = builds(
