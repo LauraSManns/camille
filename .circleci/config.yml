@@ -1,5 +1,8 @@
 version: 2.1
 
+orbs:
+  win: circleci/windows@2.2.0
+
 commands:
 
   bootstrap-macos:
@@ -34,20 +37,42 @@ commands:
           name: Setup Linux environment
           command: |
             sudo apt-get update
-            sudo apt-get install -y cmake g++ git 
+            sudo apt-get install -y build-essential
+
+  python-win-test:
+    parameters:
+      python-version:
+        type: string
+    steps:
+      - run:
+          name: Install Python dependencies
+          command: |
+            $env:CMAKE_GENERATOR = "Visual Studio 16 2019"
+            conda activate py-<< parameters.python-version >>
+            python -m pip install cmake scikit-build pybind11
+            python -m pip install -r requirements-dev.txt
+            python -m pip install -r requirements.txt
+            python setup.py build_ext --inplace
+
+      - run:
+          name: Test python
+          command: |
+            conda activate py-<< parameters.python-version >>
+            python setup.py test --verbose
+
 
   install-python-deps:
     steps:
       - run:
           name: Install Python dependencies
           command: |
-            if [ `uname -s` == "Darwin" ]; then 
+            if [ `uname -s` == "Darwin" ]; then
               . py_venv/bin/activate
             fi
             python3 --version
             python3 -m pip install -r requirements.txt
             python3 -m pip install -r requirements-dev.txt
-            python3 -m pip install cmake flake8 bandit setuptools-scm 
+            python3 -m pip install cmake flake8 bandit setuptools-scm
             python3 -m pip install coverage codacy-coverage
 
   python-build-test:
@@ -55,7 +80,7 @@ commands:
       - run:
           name: Build & test python
           command: |
-            if [ `uname -s` == "Darwin" ]; then 
+            if [ `uname -s` == "Darwin" ]; then
               . py_venv/bin/activate
             fi
             python3 setup.py build_ext --inplace
@@ -87,7 +112,7 @@ commands:
       - run:
           name: Codacy code coverage check
           command: |
-            if [ ! -z "${CODACY_PROJECT_TOKEN}" ]; then 
+            if [ ! -z "${CODACY_PROJECT_TOKEN}" ]; then
               coverage run setup.py test;
               coverage xml;
               python-codacy-coverage -r coverage.xml;
@@ -117,6 +142,19 @@ commands:
             python3 -m twine upload -u __token__ --skip-existing dist/*
 
 jobs:
+
+  repo-health-check:
+    docker:
+      - image: "circleci/python:3.8"
+    steps:
+      - checkout
+      - bootstrap-linux
+      - install-python-deps
+      - python-build-test
+      - flake8-req-check
+      - bandit-check
+      - codacy-check
+
   python-check:
     parameters:
       version:
@@ -153,7 +191,21 @@ jobs:
           python-version: << parameters.python-version >>
       - install-python-deps
       - python-build-test
-  
+
+  python-win-check:
+    parameters:
+      python-version:
+        type: string
+    executor:
+      name: win/default
+      shell: powershell.exe
+    steps:
+      - checkout
+      - bootstrap-win:
+          python-version: << parameters.python-version >>
+      - python-win-test:
+          python-version: << parameters.python-version >>
+
   sdist-deploy:
     docker:
       - image: "circleci/python:3.6"
@@ -168,8 +220,7 @@ jobs:
     docker:
       - image: "circleci/python:3.6"
     environment:
-      - CIBW_BUILD: "cp35-manylinux_x86_64 cp36-manylinux_x86_64 cp37-manylinux_x86_64 cp38-manylinux_x86_64"
-      - CIBW_BEFORE_ALL: "yum install -y gcc ninja-build"
+      - CIBW_BUILD: "cp36-manylinux_x86_64 cp37-manylinux_x86_64 cp38-manylinux_x86_64 cp39-manylinux_x86_64"
       - CIBW_BEFORE_BUILD: "pip install cmake setuptools-scm -r requirements.txt && pip install -r requirements-dev.txt"
     steps:
       - checkout
@@ -181,7 +232,7 @@ jobs:
     macos:
       xcode: 11.0.0
     environment:
-      - CIBW_BUILD: "cp35-macosx_x86_64 cp36-macosx_x86_64 cp37-macosx_x86_64 cp38-macosx_x86_64"
+      - CIBW_BUILD: "cp36-macosx_x86_64 cp37-macosx_x86_64 cp38-macosx_x86_64 cp39-macosx_x86_64"
       - CIBW_BEFORE_BUILD: "pip3 install cmake setuptools-scm -r requirements.txt && pip3 install -r requirements-dev.txt"
     steps:
       - checkout
@@ -194,9 +245,6 @@ workflows:
   linux-check:
     jobs:
       - python-check:
-          name: Python 3.5
-          version: "3.5"
-      - python-check:
           name: Python 3.6
           version: "3.6"
       - python-check:
@@ -205,12 +253,12 @@ workflows:
       - python-check:
           name: Python 3.8
           version: "3.8"
+      - python-check:
+          name: Python 3.9
+          version: "3.9"
 
   macos-check:
     jobs:
-      - python-macos-check:
-          name: MacOS Python 3.5
-          python-version: "3.5"
       - python-macos-check:
           name: MacOS Python 3.6
           python-version: "3.6"
@@ -220,6 +268,24 @@ workflows:
       - python-macos-check:
           name: MacOS Python 3.8
           python-version: "3.8"
+      - python-macos-check:
+          name: MacOS Python 3.9
+          python-version: "3.9"
+
+  windows-check:
+    jobs:
+      - python-win-check:
+          name: Win Python 3.6
+          python-version: "3.6"
+      - python-win-check:
+          name: Win Python 3.7
+          python-version: "3.7"
+      - python-win-check:
+          name: Win Python 3.8
+          python-version: "3.8"
+      - python-win-check:
+          name: Win Python 3.9
+          python-version: "3.9"
 
   linux-deploy:
     jobs:
@@ -239,7 +305,7 @@ workflows:
               only: /[0-9]+(\.[0-9]+)*/
             branches:
               ignore: /.*/
-  
+
   macos-deploy:
     jobs:
       - wheels-macos-deploy:
@@ -254,3 +320,14 @@ workflows:
     jobs:
       - python-formatting-check:
           name: Python formatting check
+
+  health-check:
+    triggers:
+      - schedule:
+          cron: "0 0 * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - repo-health-check
